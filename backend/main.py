@@ -1,7 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, Form, Header
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from moviepy.editor import VideoFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, concatenate_videoclips, TextClip, CompositeVideoClip, ColorClip
 from moviepy.video.fx.crop import crop as crop_fx
 try:
     from PIL import Image as _PIL_Image, ImageDraw, ImageFont
@@ -88,7 +88,7 @@ def write_video_clip_no_audio(clip: "VideoClip", output_path: str):
         audio=False,
         verbose=False,
         logger=None,
-        preset='medium',
+        preset='ultrafast',
         threads=4,
         bitrate="2000k",
         ffmpeg_params=["-crf", "23", "-vf", "scale=iw:ih"]  # Preserve original dimensions
@@ -251,16 +251,14 @@ async def extract_switch_clip(
         half = float(total_duration) / 2.0
         start = max(0.0, float(timestamp) - half)
         # Load
-        left_clip = VideoFileClip(temp_left_path)
-        right_clip = VideoFileClip(temp_right_path)
+        left_clip = VideoFileClip(temp_left_path, audio=False)
+        right_clip = VideoFileClip(temp_right_path, audio=False)
         end = min(start + float(total_duration), left_clip.duration, right_clip.duration)
         # Adjust total_duration if needed
         total_duration_effective = end - start
 
         left_sub = left_clip.subclip(start, end)
         right_sub = right_clip.subclip(start, end)
-        left_sub.audio = None
-        right_sub.audio = None
 
         # Normalize plan till to effective duration if shorter
         norm_plan = []
@@ -394,7 +392,7 @@ async def extract_clip(
 
         # Load video and extract clip
         print(f"[EXTRACT] Loading video file...")
-        clip = VideoFileClip(temp_input_path)
+        clip = VideoFileClip(temp_input_path, audio=False)
 
         print(f"[EXTRACT] Video duration: {clip.duration}s")
         print(f"[EXTRACT] Extracting subclip from {start}s to {end}s...")
@@ -406,9 +404,6 @@ async def extract_clip(
 
         subclip = clip.subclip(start, end)
 
-        # Remove audio to avoid processing issues
-        subclip.audio = None
-
         print(f"[EXTRACT] Writing video file (no audio) to {output_path}...")
 
         # Write video only (no audio processing) preserving original aspect ratio and dimensions
@@ -418,7 +413,7 @@ async def extract_clip(
             audio=False,
             verbose=False,
             logger=None,
-            preset='medium',  # Better compression than ultrafast
+            preset='ultrafast',  # Better compression than ultrafast
             threads=4,
             bitrate="2000k",  # Limit bitrate to reduce file size
             ffmpeg_params=["-crf", "23", "-vf", "scale=iw:ih"]  # Preserve original dimensions (iw=input width, ih=input height)
@@ -525,7 +520,7 @@ async def generate_highlights(x_session_id: Optional[str] = Header(None)):
             print(f"[HIGHLIGHTS] Checking clip: {clip_path} (timestamp: {clip_info.get('timestamp', 'unknown')})")
             if os.path.exists(clip_path):
                 print(f"[HIGHLIGHTS] Loading clip: {clip_path}")
-                video_clips.append(VideoFileClip(clip_path))
+                video_clips.append(VideoFileClip(clip_path, audio=False))
             else:
                 print(f"[HIGHLIGHTS] Warning: Clip file not found: {clip_path}")
 
@@ -534,94 +529,38 @@ async def generate_highlights(x_session_id: Optional[str] = Header(None)):
 
         print(f"[HIGHLIGHTS] Concatenating {len(video_clips)} clips...")
 
-        # Crop ratio: 5:4, Output aspect ratio: 1:1
-        crop_aspect = 5.0 / 4.0  # 5:4 crop ratio
-        target_width = 1920
-        target_height = 1920
-        target_aspect = 1.0 / 1.0  # 1:1 output aspect ratio
+        # Fit all clips into a 16:9, 1280x720 frame with black borders (letterboxing/pillarboxing)
+        target_width = 1280
+        target_height = 720
         
-        print(f"[HIGHLIGHTS] Crop ratio: 5:4, Output aspect ratio: 1:1 ({target_width}x{target_height})")
+        print(f"[HIGHLIGHTS] Fitting all clips into 16:9 ({target_width}x{target_height}) with black borders")
         
-        # Process all clips: crop to 5:4, then fit into 1:1 frame
-        resized_clips = []
+        processed_clips = []
         for i, clip in enumerate(video_clips):
-            clip.audio = None
             original_w, original_h = clip.size
-            original_aspect = original_w / original_h
-            
-            print(f"[HIGHLIGHTS] Clip {i+1}: Original size {original_w}x{original_h} (aspect {original_aspect:.2f})")
-            
-            # Step 1: Crop to 5:4 (center crop)
-            try:
-                if abs(original_aspect - crop_aspect) < 0.01:
-                    # Already 5:4, no crop needed
-                    cropped = clip
-                    print(f"[HIGHLIGHTS] Clip {i+1}: Already 5:4, no crop needed")
-                elif original_aspect > crop_aspect:
-                    # Wider than 5:4 - crop sides (center crop)
-                    # Keep full height, crop width to 5:4
-                    crop_width = int(original_h * crop_aspect)
-                    crop_x1 = (original_w - crop_width) // 2
-                    crop_x2 = crop_x1 + crop_width
-                    # Use fx method for crop
-                    cropped = clip.fx(crop_fx, x1=crop_x1, y1=0, x2=crop_x2, y2=original_h)
-                    print(f"[HIGHLIGHTS] Clip {i+1}: Cropped sides to 5:4 ({crop_width}x{original_h})")
-                else:
-                    # Taller than 5:4 - crop top/bottom (center crop)
-                    # Keep full width, crop height to 5:4
-                    crop_height = int(original_w / crop_aspect)
-                    crop_y1 = (original_h - crop_height) // 2
-                    crop_y2 = crop_y1 + crop_height
-                    # Use fx method for crop
-                    cropped = clip.fx(crop_fx, x1=0, y1=crop_y1, x2=original_w, y2=crop_y2)
-                    print(f"[HIGHLIGHTS] Clip {i+1}: Cropped top/bottom to 5:4 ({original_w}x{crop_height})")
-            except Exception as e:
-                print(f"[HIGHLIGHTS] ERROR cropping clip {i+1}: {e}")
-                # Fallback: try direct crop method
-                try:
-                    if original_aspect > crop_aspect:
-                        crop_width = int(original_h * crop_aspect)
-                        crop_x1 = (original_w - crop_width) // 2
-                        cropped = clip.crop(x1=crop_x1, y1=0, x2=crop_x1+crop_width, y2=original_h)
-                    else:
-                        crop_height = int(original_w / crop_aspect)
-                        crop_y1 = (original_h - crop_height) // 2
-                        cropped = clip.crop(x1=0, y1=crop_y1, x2=original_w, y2=crop_y1+crop_height)
-                except Exception as e2:
-                    print(f"[HIGHLIGHTS] ERROR with fallback crop: {e2}")
-                    # If crop fails, just use original clip
-                    cropped = clip
-            
-            # Verify cropped clip is 5:4
-            cropped_w, cropped_h = cropped.size
-            cropped_aspect = cropped_w / cropped_h
-            print(f"[HIGHLIGHTS] Clip {i+1}: After crop {cropped_w}x{cropped_h} (aspect {cropped_aspect:.3f}, should be {crop_aspect:.3f})")
-            
-            # Step 2: Stretch 5:4 cropped content to fill 1:1 output frame
-            # Stretch directly to target dimensions (1920x1920) - this will distort aspect ratio but fill the frame
-            print(f"[HIGHLIGHTS] Clip {i+1}: Stretching 5:4 content to fill 1:1 frame ({target_width}x{target_height})")
-            
-            # Stretch the 5:4 content to fill the entire 1:1 frame
-            # This will distort the aspect ratio but fill the frame completely
-            resized = cropped.resize((target_width, target_height))
-            
-            # Verify resize worked
-            final_w, final_h = resized.size
-            final_aspect = final_w / final_h
-            print(f"[HIGHLIGHTS] Clip {i+1}: After stretch {final_w}x{final_h} (aspect {final_aspect:.3f}, should be {target_aspect:.3f})")
-            
-            # Verify the clip has correct dimensions
-            if final_w != target_width or final_h != target_height:
-                print(f"[HIGHLIGHTS] ERROR: Clip {i+1} dimensions don't match! Expected {target_width}x{target_height}, got {final_w}x{final_h}")
-                # Force resize to correct dimensions
-                resized = resized.resize((target_width, target_height))
-                print(f"[HIGHLIGHTS] Clip {i+1}: Force resized to {target_width}x{target_height}")
-            
-            resized_clips.append(resized)
+            print(f"[HIGHLIGHTS] Clip {i+1}: Original size {original_w}x{original_h}")
 
-        # Combine all clips (video only, no audio) - all clips now have same 1:1 dimensions
-        print(f"[HIGHLIGHTS] Concatenating {len(resized_clips)} clips with 1:1 dimensions...")
-        final_clip = concatenate_videoclips(resized_clips, method="compose")
+            # Determine the new size to fit within the target dimensions while maintaining aspect ratio
+            ratio = min(target_width / original_w, target_height / original_h)
+            new_size = (int(original_w * ratio), int(original_h * ratio))
+
+            # Resize the clip
+            resized_clip = clip.resize(new_size)
+            print(f"[HIGHLIGHTS] Clip {i+1}: Resized to {new_size[0]}x{new_size[1]} to fit 16:9 frame")
+
+            # Create a black background clip
+            background = ColorClip(size=(target_width, target_height),
+                                   color=(0, 0, 0),
+                                   duration=resized_clip.duration)
+
+            # Composite the resized clip onto the background, centered
+            composited_clip = CompositeVideoClip([background, resized_clip.set_position("center")])
+            
+            processed_clips.append(composited_clip)
+
+        # Combine all clips (video only, no audio) - all clips are now 1280x720
+        print(f"[HIGHLIGHTS] Concatenating {len(processed_clips)} clips with 16:9 dimensions...")
+        final_clip = concatenate_videoclips(processed_clips, method="compose")
         
         # Verify final clip dimensions
         print(f"[HIGHLIGHTS] After concatenation: {final_clip.w}x{final_clip.h} (should be {target_width}x{target_height})")
@@ -638,7 +577,7 @@ async def generate_highlights(x_session_id: Optional[str] = Header(None)):
                 print(f"[HIGHLIGHTS] Warning: Could not remove old file: {e}")
 
         print(f"[HIGHLIGHTS] Writing combined video (no audio) to: {highlights_path}")
-        print(f"[HIGHLIGHTS] Final video dimensions: {final_clip.w}x{final_clip.h} (should be {target_width}x{target_height} for 1:1)")
+        print(f"[HIGHLIGHTS] Final video dimensions: {final_clip.w}x{final_clip.h} (should be {target_width}x{target_height} for 16:1)")
         
         # Ensure final clip has exact 1:1 dimensions
         if final_clip.w != target_width or final_clip.h != target_height:
@@ -653,13 +592,12 @@ async def generate_highlights(x_session_id: Optional[str] = Header(None)):
             audio=False,
             verbose=False,
             logger=None,
-            preset='medium',  # Better compression
+            preset='ultrafast',  # Better compression
             threads=4,
             bitrate="2000k",  # Limit bitrate
             ffmpeg_params=[
                 "-crf", "23",
-                "-vf", f"scale={target_width}:{target_height}:force_original_aspect_ratio=0,setsar=1:1",  # Force exact dimensions, set SAR
-                "-aspect", "1:1",  # Set aspect ratio metadata
+                "-aspect", "16:9",  # Set aspect ratio metadata
                 "-pix_fmt", "yuv420p"  # Ensure compatibility
             ]
         )
@@ -674,7 +612,7 @@ async def generate_highlights(x_session_id: Optional[str] = Header(None)):
             pass
 
         # Close resized clips
-        for clip in resized_clips:
+        for clip in processed_clips:
             try:
                 clip.close()
             except:
@@ -766,6 +704,49 @@ async def get_clip_file(clip_id: str, x_session_id: Optional[str] = Header(None)
         return JSONResponse(status_code=404, content={"error": "Clip not found"})
     except Exception as e:
         print(f"[GET_CLIP] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/clip/{clip_id}")
+async def delete_clip(clip_id: str, x_session_id: Optional[str] = Header(None)):
+    """
+    Delete a specific clip by its clip_id.
+    """
+    session_id = x_session_id or "default"
+    print(f"[DELETE_CLIP] Received request to delete clip_id: {clip_id} in session: {session_id}")
+    try:
+        clips_data = load_clips_metadata(session_id)
+        
+        clip_to_delete = None
+        for clip_info in clips_data:
+            if clip_info.get("clip_id") == clip_id:
+                clip_to_delete = clip_info
+                break
+        
+        if not clip_to_delete:
+            print(f"[DELETE_CLIP] Clip not found: {clip_id}")
+            return JSONResponse(status_code=404, content={"error": "Clip not found"})
+            
+        # Delete the file
+        clip_path = clip_to_delete.get("path")
+        if clip_path and os.path.exists(clip_path):
+            try:
+                os.unlink(clip_path)
+                print(f"[DELETE_CLIP] Deleted file: {clip_path}")
+            except Exception as e:
+                print(f"[DELETE_CLIP] Warning: Could not delete file {clip_path}: {e}")
+            
+        # Remove from metadata
+        new_clips_data = [c for c in clips_data if c.get("clip_id") != clip_id]
+        save_clips_metadata(new_clips_data, session_id)
+        print(f"[DELETE_CLIP] Removed clip {clip_id} from metadata. New total: {len(new_clips_data)}")
+        
+        return JSONResponse({"message": f"Clip {clip_id} deleted successfully", "total_clips": len(new_clips_data)})
+
+    except Exception as e:
+        print(f"[DELETE_CLIP] ERROR: {str(e)}")
         import traceback
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -870,8 +851,8 @@ async def extract_slider_clips(
         tright.close()
 
         # Load base clips
-        left_clip = VideoFileClip(temp_left_path)
-        right_clip = VideoFileClip(temp_right_path)
+        left_clip = VideoFileClip(temp_left_path, audio=False)
+        right_clip = VideoFileClip(temp_right_path, audio=False)
 
         print(f"[EXTRACT_SLIDER] Left video duration: {left_clip.duration}s")
         print(f"[EXTRACT_SLIDER] Right video duration: {right_clip.duration}s")
@@ -906,17 +887,13 @@ async def extract_slider_clips(
             if view == "left":
                 # Left only - use left video range
                 output_clip = left_clip.subclip(left_start, left_end)
-                output_clip.audio = None
             elif view == "right":
                 # Right only - use right video range
                 output_clip = right_clip.subclip(right_start, right_end)
-                output_clip.audio = None
             else:  # total (use switch timeline logic)
                 # Extract clips with their exact ranges as specified
                 left_sub = left_clip.subclip(left_start, left_end)
                 right_sub = right_clip.subclip(right_start, right_end)
-                left_sub.audio = None
-                right_sub.audio = None
                 
                 # Calculate the total duration based on your views configuration
                 if views and len(views) > 0:
@@ -983,7 +960,6 @@ async def extract_slider_clips(
                 
                 # Concatenate all segments using chain method to preserve original dimensions
                 output_clip = concatenate_videoclips(segments, method="chain")
-                output_clip.audio = None
                 
                 # Cleanup subclips
                 try:
@@ -1143,7 +1119,7 @@ async def convert_aspect_video(
         print(f"[CONVERT_ASPECT] Saved uploaded video to: {temp_input_path}")
         
         # Load video
-        clip = VideoFileClip(temp_input_path)
+        clip = VideoFileClip(temp_input_path, audio=False)
         original_w, original_h = clip.size
         original_aspect = original_w / original_h
         
@@ -1158,66 +1134,28 @@ async def convert_aspect_video(
         print(f"[CONVERT_ASPECT] Target: 1:1 aspect ratio ({target_width}x{target_height})")
         print(f"[CONVERT_ASPECT] Crop ratio: 5:4")
         
-        # Step 1: Crop to 5:4 (center crop)
-        clip.audio = None  # Remove audio
-        
+        # Step 1 & 2: Chain crop and resize operations
+        final_clip = None
         try:
             if abs(original_aspect - crop_aspect) < 0.01:
-                # Already 5:4, no crop needed
-                cropped = clip
-                print(f"[CONVERT_ASPECT] Already 5:4, no crop needed")
+                # Already 5:4, just resize
+                print(f"[CONVERT_ASPECT] Already 5:4, resizing to {target_width}x{target_height}")
+                final_clip = clip.resize((target_width, target_height))
             elif original_aspect > crop_aspect:
-                # Wider than 5:4 - crop sides (center crop)
+                # Wider than 5:4 - crop sides and resize
                 crop_width = int(original_h * crop_aspect)
-                crop_x1 = (original_w - crop_width) // 2
-                crop_x2 = crop_x1 + crop_width
-                cropped = clip.fx(crop_fx, x1=crop_x1, y1=0, x2=crop_x2, y2=original_h)
-                print(f"[CONVERT_ASPECT] Cropped sides to 5:4 ({crop_width}x{original_h})")
+                print(f"[CONVERT_ASPECT] Cropping sides to {crop_width}x{original_h} and resizing")
+                final_clip = clip.fx(crop_fx, width=crop_width, x_center=original_w / 2).resize((target_width, target_height))
             else:
-                # Taller than 5:4 - crop top/bottom (center crop)
+                # Taller than 5:4 - crop top/bottom and resize
                 crop_height = int(original_w / crop_aspect)
-                crop_y1 = (original_h - crop_height) // 2
-                crop_y2 = crop_y1 + crop_height
-                cropped = clip.fx(crop_fx, x1=0, y1=crop_y1, x2=original_w, y2=crop_y2)
-                print(f"[CONVERT_ASPECT] Cropped top/bottom to 5:4 ({original_w}x{crop_height})")
+                print(f"[CONVERT_ASPECT] Cropping top/bottom to {original_w}x{crop_height} and resizing")
+                final_clip = clip.fx(crop_fx, height=crop_height, y_center=original_h / 2).resize((target_width, target_height))
+        
         except Exception as e:
-            print(f"[CONVERT_ASPECT] ERROR cropping: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback: try direct crop method
-            try:
-                if original_aspect > crop_aspect:
-                    crop_width = int(original_h * crop_aspect)
-                    crop_x1 = (original_w - crop_width) // 2
-                    cropped = clip.crop(x1=crop_x1, y1=0, x2=crop_x1+crop_width, y2=original_h)
-                    print(f"[CONVERT_ASPECT] Fallback: Cropped sides to 5:4 ({crop_width}x{original_h})")
-                else:
-                    crop_height = int(original_w / crop_aspect)
-                    crop_y1 = (original_h - crop_height) // 2
-                    cropped = clip.crop(x1=0, y1=crop_y1, x2=original_w, y2=crop_y1+crop_height)
-                    print(f"[CONVERT_ASPECT] Fallback: Cropped top/bottom to 5:4 ({original_w}x{crop_height})")
-            except Exception as e2:
-                print(f"[CONVERT_ASPECT] ERROR with fallback crop: {e2}")
-                traceback.print_exc()
-                # If crop fails, just use original clip
-                cropped = clip
-                print(f"[CONVERT_ASPECT] Using original clip as fallback")
-        
-        # Verify cropped clip
-        cropped_w, cropped_h = cropped.size
-        cropped_aspect = cropped_w / cropped_h
-        print(f"[CONVERT_ASPECT] After crop: {cropped_w}x{cropped_h} (aspect {cropped_aspect:.3f})")
-        
-        # Step 2: Stretch 5:4 content to fill 1:1 frame
-        print(f"[CONVERT_ASPECT] Stretching 5:4 content to fill 1:1 frame ({target_width}x{target_height})")
-        try:
-            final_clip = cropped.resize((target_width, target_height))
-        except Exception as e:
-            print(f"[CONVERT_ASPECT] ERROR resizing: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-        
+            print(f"[CONVERT_ASPECT] ERROR processing video: {e}. Falling back to resize only.")
+            final_clip = clip.resize((target_width, target_height))
+
         # Verify final dimensions
         final_w, final_h = final_clip.size
         final_aspect = final_w / final_h
@@ -1253,7 +1191,7 @@ async def convert_aspect_video(
                 audio=False,
                 verbose=False,
                 logger=None,
-                preset='medium',
+                preset='ultrafast',
                 threads=4,
                 bitrate="2000k",
                 ffmpeg_params=[
@@ -1286,15 +1224,11 @@ async def convert_aspect_video(
         except:
             pass
         # Only close cropped if it's different from clip
-        if cropped is not clip:
+        if clip is not None: # Ensure clip is not None before checking
             try:
-                cropped.close()
+                clip.close()
             except:
                 pass
-        try:
-            clip.close()
-        except:
-            pass
         
         # Clean up input file
         if temp_input_path and os.path.exists(temp_input_path):
