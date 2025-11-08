@@ -369,6 +369,18 @@ export default function App() {
 
   return (
     <div style={styles.app}>
+      {/* Uploading Overlay */}
+      {isUploading && (
+        <div style={styles.uploadingOverlay}>
+          <div style={styles.uploadingModal}>
+            <div style={styles.spinner}></div>
+            <h2 style={styles.uploadingTitle}>Uploading Videos</h2>
+            <p style={styles.uploadingText}>Processing 4 camera angles...</p>
+            <p style={styles.uploadingSubtext}>This may take a moment</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header style={styles.header}>
         <div style={styles.headerContent}>
@@ -448,5 +460,51 @@ const styles = {
   container: {
     maxWidth: '1600px',
     margin: '0 auto',
+  },
+  uploadingOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.85)',
+    backdropFilter: 'blur(8px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+  },
+  uploadingModal: {
+    background: '#1a1a1a',
+    border: '2px solid #3b8bff',
+    borderRadius: '12px',
+    padding: '40px 60px',
+    textAlign: 'center',
+    boxShadow: '0 8px 32px rgba(59, 139, 255, 0.3)',
+  },
+  spinner: {
+    width: '60px',
+    height: '60px',
+    margin: '0 auto 24px',
+    border: '4px solid #2a2a2a',
+    borderTop: '4px solid #3b8bff',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+  },
+  uploadingTitle: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#f5f5f5',
+    margin: '0 0 12px 0',
+  },
+  uploadingText: {
+    fontSize: '16px',
+    color: '#aaa',
+    margin: '0 0 8px 0',
+  },
+  uploadingSubtext: {
+    fontSize: '14px',
+    color: '#777',
+    margin: 0,
   },
 };
