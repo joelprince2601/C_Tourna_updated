@@ -50,6 +50,8 @@ class FFmpegResult:
 class FFmpegService:
     """High-performance FFmpeg service for stream-copy operations"""
 
+    ACCURATE_SEEK_PREROLL = 1.5  # seconds of safety padding before precise trim
+
     def __init__(self, ffmpeg_bin: str = "ffmpeg", ffprobe_bin: str = "ffprobe"):
         self.ffmpeg_bin = ffmpeg_bin
         self.ffprobe_bin = ffprobe_bin
@@ -144,10 +146,16 @@ class FFmpegService:
         # For accurate seeking: -ss before -i (fast seek to keyframe) + -ss after -i (accurate frame)
         # For keyframe-only: -ss before -i only
         if accurate_seek:
+            # Two-stage seek:
+            #   1) fast seek to a nearby keyframe
+            #   2) precise trim to requested start without re-encoding
+            pre_seek = max(start_s - self.ACCURATE_SEEK_PREROLL, 0)
+            fine_seek = max(start_s - pre_seek, 0)
             cmd = [
                 self.ffmpeg_bin,
-                "-ss", str(start_s),
+                "-ss", f"{pre_seek:.3f}",
                 "-i", input_path,
+                "-ss", f"{fine_seek:.3f}",
                 "-t", str(duration),
                 "-c", "copy",  # Stream copy (no re-encode)
                 "-an",  # No audio
@@ -336,7 +344,7 @@ class FFmpegService:
                     start_s=seg["start_s"],
                     end_s=seg["end_s"],
                     output_path=temp_seg_path,
-                    accurate_seek=False  # Use keyframe seeking for speed
+                    accurate_seek=True  # Prioritize precise trimming for highlight accuracy
                 )
 
                 if not result.success:
