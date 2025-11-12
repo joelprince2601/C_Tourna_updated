@@ -140,6 +140,27 @@ class FFmpegService:
         Returns:
             FFmpegResult with operation details
         """
+        # Validate inputs
+        if not os.path.exists(input_path):
+            return FFmpegResult(
+                success=False,
+                output_path=None,
+                duration_ms=0,
+                command="",
+                exit_code=-1,
+                stderr=f"Input file not found: {input_path}"
+            )
+        
+        if end_s <= start_s:
+            return FFmpegResult(
+                success=False,
+                output_path=None,
+                duration_ms=0,
+                command="",
+                exit_code=-1,
+                stderr=f"Invalid time range: end_s ({end_s}) must be > start_s ({start_s})"
+            )
+
         duration = end_s - start_s
 
         # Build FFmpeg command
@@ -156,7 +177,7 @@ class FFmpegService:
                 "-ss", f"{pre_seek:.3f}",
                 "-i", input_path,
                 "-ss", f"{fine_seek:.3f}",
-                "-t", str(duration),
+                "-t", f"{duration:.3f}",
                 "-c", "copy",  # Stream copy (no re-encode)
                 "-an",  # No audio
                 "-avoid_negative_ts", "make_zero",  # Fix timestamp issues
@@ -166,30 +187,47 @@ class FFmpegService:
         else:
             cmd = [
                 self.ffmpeg_bin,
-                "-ss", str(start_s),
+                "-ss", f"{start_s:.3f}",
                 "-i", input_path,
-                "-t", str(duration),
+                "-t", f"{duration:.3f}",
                 "-c", "copy",
                 "-an",
+                "-avoid_negative_ts", "make_zero",  # Fix timestamp issues
                 "-y",
                 output_path
             ]
 
         start_time = time.time()
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         duration_ms = (time.time() - start_time) * 1000
 
         success = result.returncode == 0
         filesize = 0
         throughput = 0.0
 
-        if success and os.path.exists(output_path):
-            filesize = os.path.getsize(output_path)
-            if duration_ms > 0:
-                throughput = (filesize * 8 / 1_000_000) / (duration_ms / 1000)  # Mbps
+        if success:
+            if os.path.exists(output_path):
+                filesize = os.path.getsize(output_path)
+                if filesize == 0:
+                    logger.error(f"Extract succeeded but output file is empty: {output_path}")
+                    success = False
+                elif duration_ms > 0:
+                    throughput = (filesize * 8 / 1_000_000) / (duration_ms / 1000)  # Mbps
+            else:
+                logger.error(f"Extract succeeded but output file not found: {output_path}")
+                success = False
+
+        if not success:
+            logger.error(f"Extract segment failed: {result.stderr}")
+            # Clean up partial output
+            if os.path.exists(output_path):
+                try:
+                    os.unlink(output_path)
+                except:
+                    pass
 
         logger.info(f"Extract segment: {start_s:.2f}s-{end_s:.2f}s, "
-                   f"duration={duration_ms:.0f}ms, size={filesize:,} bytes, "
+                   f"success={success}, duration={duration_ms:.0f}ms, size={filesize:,} bytes, "
                    f"throughput={throughput:.1f} Mbps")
 
         return FFmpegResult(
@@ -229,32 +267,82 @@ class FFmpegService:
                 stderr="No segments provided"
             )
 
-        if len(segment_paths) == 1:
-            # Single segment - just copy
-            import shutil
-            shutil.copy2(segment_paths[0], output_path)
-            filesize = os.path.getsize(output_path)
+        # Validate all segment files exist and are not empty
+        valid_segments = []
+        for i, path in enumerate(segment_paths):
+            if not os.path.exists(path):
+                logger.error(f"Segment {i} does not exist: {path}")
+                return FFmpegResult(
+                    success=False,
+                    output_path=None,
+                    duration_ms=0,
+                    command="",
+                    exit_code=-1,
+                    stderr=f"Segment {i} file not found: {path}"
+                )
+            filesize = os.path.getsize(path)
+            if filesize == 0:
+                logger.error(f"Segment {i} is empty: {path}")
+                return FFmpegResult(
+                    success=False,
+                    output_path=None,
+                    duration_ms=0,
+                    command="",
+                    exit_code=-1,
+                    stderr=f"Segment {i} is empty: {path}"
+                )
+            valid_segments.append(path)
+            logger.info(f"Validated segment {i+1}/{len(segment_paths)}: {path} ({filesize:,} bytes)")
+
+        if len(valid_segments) == 0:
             return FFmpegResult(
-                success=True,
-                output_path=output_path,
+                success=False,
+                output_path=None,
                 duration_ms=0,
-                command=f"cp {segment_paths[0]} {output_path}",
-                exit_code=0,
-                stderr="",
-                filesize_bytes=filesize
+                command="",
+                exit_code=-1,
+                stderr="No valid segments to concatenate"
             )
 
+        if len(valid_segments) == 1:
+            # Single segment - just copy
+            import shutil
+            try:
+                shutil.copy2(valid_segments[0], output_path)
+                filesize = os.path.getsize(output_path)
+                logger.info(f"Single segment copied: {filesize:,} bytes")
+                return FFmpegResult(
+                    success=True,
+                    output_path=output_path,
+                    duration_ms=0,
+                    command=f"cp {valid_segments[0]} {output_path}",
+                    exit_code=0,
+                    stderr="",
+                    filesize_bytes=filesize
+                )
+            except Exception as e:
+                return FFmpegResult(
+                    success=False,
+                    output_path=None,
+                    duration_ms=0,
+                    command="",
+                    exit_code=-1,
+                    stderr=f"Failed to copy single segment: {str(e)}"
+                )
+
         # Create concat file
-        concat_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+        concat_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
         try:
-            for path in segment_paths:
+            for path in valid_segments:
                 # Convert to absolute path and forward slashes for ffmpeg compatibility
                 abs_path = os.path.abspath(path).replace('\\', '/')
                 # Escape special characters for ffmpeg concat format
                 escaped_path = abs_path.replace("'", "'\\''")
                 concat_file.write(f"file '{escaped_path}'\n")
+            concat_file.flush()
             concat_file.close()
 
+            # Use more robust concat options to prevent timestamp issues
             cmd = [
                 self.ffmpeg_bin,
                 "-f", "concat",
@@ -262,25 +350,44 @@ class FFmpegService:
                 "-i", concat_file.name,
                 "-c", "copy",  # Stream copy
                 "-an",  # No audio
+                "-avoid_negative_ts", "make_zero",  # Fix timestamp issues
+                "-fflags", "+genpts",  # Generate presentation timestamps
                 "-y",
                 output_path
             ]
 
+            logger.info(f"Concatenating {len(valid_segments)} segments...")
             start_time = time.time()
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             duration_ms = (time.time() - start_time) * 1000
 
             success = result.returncode == 0
             filesize = 0
             throughput = 0.0
 
-            if success and os.path.exists(output_path):
-                filesize = os.path.getsize(output_path)
-                if duration_ms > 0:
-                    throughput = (filesize * 8 / 1_000_000) / (duration_ms / 1000)  # Mbps
+            if success:
+                if os.path.exists(output_path):
+                    filesize = os.path.getsize(output_path)
+                    if filesize == 0:
+                        logger.error("Output file created but is empty")
+                        success = False
+                    elif duration_ms > 0:
+                        throughput = (filesize * 8 / 1_000_000) / (duration_ms / 1000)  # Mbps
+                else:
+                    logger.error("Output file was not created")
+                    success = False
 
-            logger.info(f"Concat {len(segment_paths)} segments: "
-                       f"duration={duration_ms:.0f}ms, size={filesize:,} bytes, "
+            if not success:
+                logger.error(f"Concat failed: {result.stderr}")
+                # Clean up partial output
+                if os.path.exists(output_path):
+                    try:
+                        os.unlink(output_path)
+                    except:
+                        pass
+
+            logger.info(f"Concat {len(valid_segments)} segments: "
+                       f"success={success}, duration={duration_ms:.0f}ms, size={filesize:,} bytes, "
                        f"throughput={throughput:.1f} Mbps")
 
             return FFmpegResult(
@@ -296,9 +403,10 @@ class FFmpegService:
         finally:
             # Cleanup concat file
             try:
-                os.unlink(concat_file.name)
-            except:
-                pass
+                if os.path.exists(concat_file.name):
+                    os.unlink(concat_file.name)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup concat file: {e}")
 
     def extract_and_concat(
         self,
@@ -335,9 +443,17 @@ class FFmpegService:
         total_extract_ms = 0
 
         try:
-            # Step 1: Extract all segments
+            # Step 1: Extract all segments with validation
             for i, seg in enumerate(segments):
                 temp_seg_path = os.path.join(temp_dir, f"seg_{i:04d}_{int(time.time()*1000)}.mp4")
+
+                # Validate input file exists
+                if not os.path.exists(seg["path"]):
+                    raise RuntimeError(f"Segment {i} input file not found: {seg['path']}")
+
+                # Validate time range
+                if seg["end_s"] <= seg["start_s"]:
+                    raise RuntimeError(f"Segment {i} has invalid time range: {seg['start_s']} to {seg['end_s']}")
 
                 result = self.extract_segment(
                     input_path=seg["path"],
@@ -350,10 +466,23 @@ class FFmpegService:
                 if not result.success:
                     raise RuntimeError(f"Failed to extract segment {i}: {result.stderr}")
 
+                # Validate extracted segment exists and is not empty
+                if not os.path.exists(temp_seg_path):
+                    raise RuntimeError(f"Segment {i} extraction succeeded but file not found: {temp_seg_path}")
+
+                seg_filesize = os.path.getsize(temp_seg_path)
+                if seg_filesize == 0:
+                    raise RuntimeError(f"Segment {i} extraction succeeded but file is empty: {temp_seg_path}")
+
                 temp_segments.append(temp_seg_path)
                 total_extract_ms += result.duration_ms
+                logger.info(f"Extracted segment {i+1}/{len(segments)}: {seg_filesize:,} bytes")
 
             # Step 2: Concatenate all segments
+            if len(temp_segments) == 0:
+                raise RuntimeError("No segments were successfully extracted")
+
+            logger.info(f"All {len(temp_segments)} segments extracted successfully, starting concatenation...")
             concat_result = self.concat_segments(temp_segments, output_path)
 
             if not concat_result.success:
