@@ -44,15 +44,28 @@ class ReelService:
         if not clip_ids:
             raise ValueError("No clips provided")
 
-        # Validate all clips exist
+        # Validate all clips exist and are valid
         clip_paths = []
         total_duration = 0.0
-        for clip_id in clip_ids:
+        for i, clip_id in enumerate(clip_ids):
             try:
                 clip = self.clip_service.get_clip(clip_id)
+                
+                # Validate clip file exists and is not empty
+                if not os.path.exists(clip.output_path):
+                    raise ValueError(f"Clip {clip_id} file not found: {clip.output_path}")
+                
+                clip_filesize = os.path.getsize(clip.output_path)
+                if clip_filesize == 0:
+                    raise ValueError(f"Clip {clip_id} file is empty: {clip.output_path}")
+                
+                if clip.duration_s <= 0:
+                    raise ValueError(f"Clip {clip_id} has invalid duration: {clip.duration_s}s")
+                
                 clip_paths.append(clip.output_path)
                 total_duration += clip.duration_s
-                logger.info(f"  Including clip {clip_id}: {clip.duration_s:.2f}s")
+                logger.info(f"  Validated clip {i+1}/{len(clip_ids)} ({clip_id}): "
+                           f"{clip.duration_s:.2f}s, {clip_filesize:,} bytes")
             except KeyError:
                 raise ValueError(f"Clip {clip_id} not found")
 
@@ -64,6 +77,7 @@ class ReelService:
                    f"total duration={total_duration:.2f}s")
 
         # Concatenate clips using FFmpeg
+        logger.info(f"Starting concatenation of {len(clip_paths)} clips...")
         start_time = time.time()
         result = self.ffmpeg.concat_segments(
             segment_paths=clip_paths,
@@ -73,7 +87,17 @@ class ReelService:
         if not result.success:
             raise RuntimeError(f"Failed to create reel: {result.stderr}")
 
+        # Validate final output file
+        if not os.path.exists(str(output_path)):
+            raise RuntimeError(f"Reel file was not created: {output_path}")
+        
+        final_filesize = os.path.getsize(str(output_path))
+        if final_filesize == 0:
+            raise RuntimeError(f"Reel file was created but is empty: {output_path}")
+        
         processing_time_ms = (time.time() - start_time) * 1000
+        
+        logger.info(f"Reel concatenation successful: {final_filesize:,} bytes")
 
         # Create reel object
         reel = Reel(
