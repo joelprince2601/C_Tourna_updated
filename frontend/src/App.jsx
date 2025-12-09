@@ -103,6 +103,41 @@ export default function App() {
     });
   }, [playbackSpeed]);
 
+  // Keyboard controls for seeking (left/right arrows)
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Don't handle if user is typing in an input field
+      const target = event.target;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      // Only handle if videos are loaded
+      const videos = Object.values(videoRefs.current).filter(v => v);
+      if (videos.length === 0 || duration === 0) {
+        return;
+      }
+
+      // Left arrow: go back 5 seconds
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        const newTime = Math.max(0, currentTime - 5);
+        handleSeek(newTime);
+      }
+      // Right arrow: go forward 5 seconds
+      else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        const newTime = Math.min(duration, currentTime + 5);
+        handleSeek(newTime);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [currentTime, duration]);
+
   const handleVideoUpload = (sourceId, file) => {
     // Revoke old blob URL to prevent memory leak
     const oldUrl = blobURLsRef.current[sourceId];
@@ -402,6 +437,8 @@ export default function App() {
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
               onVideoUpload={handleVideoUpload}
+              showAllViews={markIn !== null || markOut !== null}
+              allVideosUploaded={videoFiles.left && videoFiles.left_zoom && videoFiles.right && videoFiles.right_zoom}
             />
           </div>
 

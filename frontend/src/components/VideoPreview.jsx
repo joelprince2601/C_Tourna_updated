@@ -6,17 +6,33 @@ export default function VideoPreview({
   videoRefs,
   onTimeUpdate,
   onLoadedMetadata,
-  onVideoUpload
+  onVideoUpload,
+  showAllViews = false,
+  allVideosUploaded = false
 }) {
-  const leftSources = [
-    { id: 'left', label: 'Left Half', src: videoSources?.left },
-    { id: 'left_zoom', label: 'Left Zoom', src: videoSources?.left_zoom },
-  ];
+  // Show all 4 views if:
+  // 1. Event is marked (showAllViews is true), OR
+  // 2. Not all videos are uploaded yet (need to show upload slots)
+  // Otherwise, show only 2 views (left and right) after upload
+  const shouldShowAllViews = showAllViews || !allVideosUploaded;
 
-  const rightSources = [
-    { id: 'right', label: 'Right Half', src: videoSources?.right },
-    { id: 'right_zoom', label: 'Right Zoom', src: videoSources?.right_zoom },
-  ];
+  const leftSources = shouldShowAllViews
+    ? [
+        { id: 'left', label: 'Left Half', src: videoSources?.left },
+        { id: 'left_zoom', label: 'Left Zoom', src: videoSources?.left_zoom },
+      ]
+    : [
+        { id: 'left', label: 'Left Half', src: videoSources?.left },
+      ];
+
+  const rightSources = shouldShowAllViews
+    ? [
+        { id: 'right', label: 'Right Half', src: videoSources?.right },
+        { id: 'right_zoom', label: 'Right Zoom', src: videoSources?.right_zoom },
+      ]
+    : [
+        { id: 'right', label: 'Right Half', src: videoSources?.right },
+      ];
 
   const handleCardClick = (source) => {
     if (source.src) {
