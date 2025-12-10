@@ -44,9 +44,10 @@ export async function uploadCameras(videoFiles) {
  * Create a clip on the backend
  * @param {string} sessionKey - Session key from uploadCameras
  * @param {Object} clip - Frontend clip object with {source, start, end}
+ * @param {Object} scoreboard - Optional scoreboard data {teamAName, teamBName, scoreA, scoreB}
  * @returns {Promise<{clip_id: string, duration_s: number, filesize_bytes: number, download_url: string}>}
  */
-export async function createClip(sessionKey, clip) {
+export async function createClip(sessionKey, clip, scoreboard = null) {
   const formData = new FormData();
   formData.append('session_key', sessionKey);
 
@@ -58,6 +59,11 @@ export async function createClip(sessionKey, clip) {
   }];
 
   formData.append('segments', JSON.stringify(segments));
+  
+  // Add scoreboard if provided
+  if (scoreboard) {
+    formData.append('scoreboard', JSON.stringify(scoreboard));
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/v2/clip/create`, {
     method: 'POST',

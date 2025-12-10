@@ -8,7 +8,8 @@ export default function VideoPreview({
   onLoadedMetadata,
   onVideoUpload,
   showAllViews = false,
-  allVideosUploaded = false
+  allVideosUploaded = false,
+  scoreboard = null
 }) {
   // Show all 4 views if:
   // 1. Event is marked (showAllViews is true), OR
@@ -69,6 +70,16 @@ export default function VideoPreview({
       onClick={() => handleCardClick(source)}
     >
       {source.src && (
+        <>
+          {scoreboard && (
+            <div style={styles.scoreboardOverlay}>
+              <div style={styles.scoreboardRow}>
+                <span style={styles.scoreboardTeam}>{scoreboard.teamAName}</span>
+                <span style={styles.scoreboardScore}>{`${scoreboard.scoreA} - ${scoreboard.scoreB}`}</span>
+                <span style={styles.scoreboardTeam}>{scoreboard.teamBName}</span>
+              </div>
+            </div>
+          )}
         <button
           style={styles.removeButton}
           onClick={(e) => handleRemoveVideo(source.id, e)}
@@ -78,6 +89,7 @@ export default function VideoPreview({
             <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
           </svg>
         </button>
+        </>
       )}
       <div style={styles.videoWrapper}>
         {source.src ? (
@@ -240,5 +252,35 @@ const styles = {
     zIndex: 10,
     transition: 'all 0.2s ease',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+  },
+  scoreboardOverlay: {
+    position: 'absolute',
+    top: '8px',
+    left: '8px',
+    background: 'rgba(0, 0, 0, 0.65)',
+    padding: '6px 10px',
+    borderRadius: '6px',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    color: '#f5f5f5',
+    fontSize: '13px',
+    fontWeight: '700',
+    display: 'flex',
+    alignItems: 'center',
+    pointerEvents: 'none',
+    zIndex: 5,
+  },
+  scoreboardRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  scoreboardTeam: {
+    whiteSpace: 'nowrap',
+  },
+  scoreboardScore: {
+    padding: '4px 8px',
+    background: '#1f2937',
+    borderRadius: '4px',
+    fontVariantNumeric: 'tabular-nums',
   },
 };
