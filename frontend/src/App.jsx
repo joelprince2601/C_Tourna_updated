@@ -114,7 +114,7 @@ export default function App() {
     });
   }, [playbackSpeed]);
 
-  // Keyboard controls for seeking (left/right arrows)
+  // Keyboard controls for seeking (left/right arrows) and play/pause (spacebar)
   useEffect(() => {
     const handleKeyDown = (event) => {
       // Don't handle if user is typing in an input field
@@ -125,18 +125,23 @@ export default function App() {
 
       // Only handle if videos are loaded
       const videos = Object.values(videoRefs.current).filter(v => v);
-      if (videos.length === 0 || duration === 0) {
+      if (videos.length === 0) {
         return;
       }
 
+      // Spacebar: play/pause
+      if (event.key === ' ' || event.key === 'Spacebar') {
+        event.preventDefault();
+        handlePlayPause();
+      }
       // Left arrow: go back 5 seconds
-      if (event.key === 'ArrowLeft') {
+      else if (event.key === 'ArrowLeft' && duration > 0) {
         event.preventDefault();
         const newTime = Math.max(0, currentTime - 5);
         handleSeek(newTime);
       }
       // Right arrow: go forward 5 seconds
-      else if (event.key === 'ArrowRight') {
+      else if (event.key === 'ArrowRight' && duration > 0) {
         event.preventDefault();
         const newTime = Math.min(duration, currentTime + 5);
         handleSeek(newTime);
@@ -147,7 +152,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [currentTime, duration]);
+  }, [currentTime, duration, isPlaying]);
 
   const handleVideoUpload = (sourceId, file) => {
     // Revoke old blob URL to prevent memory leak
