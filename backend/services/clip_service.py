@@ -87,52 +87,62 @@ class ClipService:
         if not result.success:
             raise RuntimeError(f"Failed to create clip: {result.stderr}")
         
-        # If scoreboard is provided, add overlay with score update at midpoint
+        # If scoreboard is provided, add overlay with score update at goal time
         if scoreboard:
             # Get score before and after this clip
             score_before = scoreboard.get('scoreBefore', {})
             score_after = scoreboard.get('scoreAfter', scoreboard)
             
-            # Calculate midpoint of clip
-            midpoint = total_duration / 2.0
+            # Get goal time (when score updates) - use provided goalTime or default to midpoint
+            goal_time = scoreboard.get('goalTime', total_duration / 2.0)
+            # Ensure goal_time is within clip bounds
+            goal_time = max(0.0, min(total_duration, goal_time))
             
-            # First half: show score before this clip
-            if score_before:
-                text_before = f"{score_before.get('teamAName', 'Team A')} {score_before.get('scoreA', 0)} - {score_before.get('scoreB', 0)} {score_before.get('teamBName', 'Team B')}"
-            else:
-                # If no scoreBefore, use scoreAfter (for clips with no score change)
-                text_before = f"{scoreboard.get('teamAName', 'Team A')} {scoreboard.get('scoreA', 0)} - {scoreboard.get('scoreB', 0)} {scoreboard.get('teamBName', 'Team B')}"
+            # Get team names and scores
+            team_a_name_before = score_before.get('teamAName', 'Team A') if score_before else scoreboard.get('teamAName', 'Team A')
+            team_b_name_before = score_before.get('teamBName', 'Team B') if score_before else scoreboard.get('teamBName', 'Team B')
+            score_a_before = score_before.get('scoreA', 0) if score_before else scoreboard.get('scoreA', 0)
+            score_b_before = score_before.get('scoreB', 0) if score_before else scoreboard.get('scoreB', 0)
             
-            # Second half: show score after this clip
-            text_after = f"{score_after.get('teamAName', 'Team A')} {score_after.get('scoreA', 0)} - {score_after.get('scoreB', 0)} {score_after.get('teamBName', 'Team B')}"
+            team_a_name_after = score_after.get('teamAName', 'Team A')
+            team_b_name_after = score_after.get('teamBName', 'Team B')
+            score_a_after = score_after.get('scoreA', 0)
+            score_b_after = score_after.get('scoreB', 0)
             
-            # Add two overlays - one for first half, one for second half
-            # First overlay: 0 to midpoint
-            filter_parts = []
-            pos = "x=10:y=10"
-            
-            # Escape text
+            # Escape text helper
             def escape_text(t):
                 return t.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("[", "\\[").replace("]", "\\]")
             
-            # First half overlay (0 to midpoint)
+            # Compact scoreboard in top-left corner with improved typography
+            filter_parts = []
+            pos = "x=15:y=15"
+            
+            # First part (0 to goal_time) - Score before
+            text_before = f"{team_a_name_before} {score_a_before} - {score_b_before} {team_b_name_before}"
             text_before_escaped = escape_text(text_before)
+            
+            # Compact overlay with bold, aesthetic font styling
+            # Using valid FFmpeg drawtext parameters only
             filter_parts.append(
                 f"drawtext=text='{text_before_escaped}':"
-                f"fontsize=32:"
+                f"fontsize=36:"
                 f"fontcolor=white:"
-                f"box=1:boxcolor=black@0.7:boxborderw=5:"
-                f"{pos}:enable='lte(t,{midpoint})'"
+                f"box=1:boxcolor=black@0.75:boxborderw=8:"
+                f"borderw=4:bordercolor=black@0.95:"
+                f"{pos}:enable='lte(t,{goal_time})'"
             )
             
-            # Second half overlay (midpoint to end)
+            # Second part (goal_time to end) - Score after
+            text_after = f"{team_a_name_after} {score_a_after} - {score_b_after} {team_b_name_after}"
             text_after_escaped = escape_text(text_after)
+            
             filter_parts.append(
                 f"drawtext=text='{text_after_escaped}':"
-                f"fontsize=32:"
+                f"fontsize=36:"
                 f"fontcolor=white:"
-                f"box=1:boxcolor=black@0.7:boxborderw=5:"
-                f"{pos}:enable='gte(t,{midpoint})'"
+                f"box=1:boxcolor=black@0.75:boxborderw=8:"
+                f"borderw=4:bordercolor=black@0.95:"
+                f"{pos}:enable='gte(t,{goal_time})'"
             )
             
             filter_complex = ",".join(filter_parts)
