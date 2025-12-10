@@ -50,6 +50,7 @@ export default function App() {
   // Clip creation state
   const [markIn, setMarkIn] = useState(null);
   const [markOut, setMarkOut] = useState(null);
+  const [goalTimestamp, setGoalTimestamp] = useState(null);
   const [clips, setClips] = useState([]);
 
   // Backend integration state
@@ -259,6 +260,16 @@ export default function App() {
     setMarkOut(currentTime);
   };
 
+  const handleGoalMark = (time = null) => {
+    // Only allow goal marking if markIn and markOut are set
+    if (markIn !== null && markOut !== null) {
+      // Use provided time or currentTime, and ensure it's within the clip range
+      const targetTime = time !== null ? time : currentTime;
+      const goalTime = Math.max(markIn, Math.min(markOut, targetTime));
+      setGoalTimestamp(goalTime);
+    }
+  };
+
   const handleCreateClip = async () => {
     if (markIn !== null && markOut !== null && markOut > markIn) {
       // Store clip data and show team selection modal
@@ -268,6 +279,7 @@ export default function App() {
         start: markIn,
         end: markOut,
         duration: markOut - markIn,
+        goalTimestamp: goalTimestamp, // Store goal timestamp relative to clip start
         backendClipId: null, // Will be set if backend creation succeeds
       };
       setPendingClip(clipData);
@@ -329,9 +341,22 @@ export default function App() {
           }
         });
         
+        // Calculate goal timestamp relative to clip start (0-based)
+        // If goalTimestamp is set and within clip range, use it; otherwise use midpoint
+        let goalTimeInClip = null;
+        if (newClip.goalTimestamp !== null && 
+            newClip.goalTimestamp >= newClip.start && 
+            newClip.goalTimestamp <= newClip.end) {
+          goalTimeInClip = newClip.goalTimestamp - newClip.start;
+        } else {
+          // Use midpoint if no goal timestamp is set
+          goalTimeInClip = newClip.duration / 2.0;
+        }
+        
         // Prepare scoreboard data for overlay
         // scoreBefore: score at start of clip
         // scoreAfter: score at end of clip (after this clip's score is added)
+        // goalTime: timestamp in clip when score should update
         const scoreboardData = {
           teamAName,
           teamBName,
@@ -347,6 +372,7 @@ export default function App() {
             scoreA: cumulativeScoreA,
             scoreB: cumulativeScoreB,
           },
+          goalTime: goalTimeInClip, // Time in clip when score updates
         };
         
         const backendClip = await createBackendClip(sessionKey, newClip, scoreboardData);
@@ -623,6 +649,8 @@ export default function App() {
             markOut={markOut}
             onMarkIn={handleMarkIn}
             onMarkOut={handleMarkOut}
+            goalTimestamp={goalTimestamp}
+            onGoalMark={handleGoalMark}
             onCreateClip={handleCreateClip}
             activeSource={activeSource}
             playbackSpeed={playbackSpeed}
