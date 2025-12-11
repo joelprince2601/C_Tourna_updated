@@ -148,8 +148,7 @@ async def upload_cameras(
 @app.post("/api/v2/clip/create", response_model=ClipResponse)
 async def create_clip(
     session_key: str = Form(...),
-    segments: str = Form(...),  # JSON string
-    scoreboard: Optional[str] = Form(None)  # JSON string with scoreboard data
+    segments: str = Form(...)  # JSON string
 ):
     """
     Create a clip from camera segments.
@@ -180,21 +179,12 @@ async def create_clip(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid segments JSON: {e}")
 
-    # Parse scoreboard if provided
-    scoreboard_data = None
-    if scoreboard:
-        try:
-            scoreboard_data = json.loads(scoreboard)
-        except Exception as e:
-            logger.warning(f"Invalid scoreboard JSON: {e}, continuing without overlay")
-
     # Create clip
     try:
         start_time = time.time()
         clip = clip_service.create_clip(
             segments=clip_segments,
-            camera_files=camera_files,
-            scoreboard=scoreboard_data
+            camera_files=camera_files
         )
         processing_time_ms = (time.time() - start_time) * 1000
 
