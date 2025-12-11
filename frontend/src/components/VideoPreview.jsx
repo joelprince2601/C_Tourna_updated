@@ -6,34 +6,17 @@ export default function VideoPreview({
   videoRefs,
   onTimeUpdate,
   onLoadedMetadata,
-  onVideoUpload,
-  showAllViews = false,
-  allVideosUploaded = false,
-  scoreboard = null
+  onVideoUpload
 }) {
-  // Show all 4 views if:
-  // 1. Event is marked (showAllViews is true), OR
-  // 2. Not all videos are uploaded yet (need to show upload slots)
-  // Otherwise, show only 2 views (left and right) after upload
-  const shouldShowAllViews = showAllViews || !allVideosUploaded;
+  const leftSources = [
+    { id: 'left', label: 'Left Half', src: videoSources?.left },
+    { id: 'left_zoom', label: 'Left Zoom', src: videoSources?.left_zoom },
+  ];
 
-  const leftSources = shouldShowAllViews
-    ? [
-        { id: 'left', label: 'Left Half', src: videoSources?.left },
-        { id: 'left_zoom', label: 'Left Zoom', src: videoSources?.left_zoom },
-      ]
-    : [
-        { id: 'left', label: 'Left Half', src: videoSources?.left },
-      ];
-
-  const rightSources = shouldShowAllViews
-    ? [
-        { id: 'right', label: 'Right Half', src: videoSources?.right },
-        { id: 'right_zoom', label: 'Right Zoom', src: videoSources?.right_zoom },
-      ]
-    : [
-        { id: 'right', label: 'Right Half', src: videoSources?.right },
-      ];
+  const rightSources = [
+    { id: 'right', label: 'Right Half', src: videoSources?.right },
+    { id: 'right_zoom', label: 'Right Zoom', src: videoSources?.right_zoom },
+  ];
 
   const handleCardClick = (source) => {
     if (source.src) {
@@ -70,16 +53,6 @@ export default function VideoPreview({
       onClick={() => handleCardClick(source)}
     >
       {source.src && (
-        <>
-          {scoreboard && (
-            <div style={styles.scoreboardOverlay}>
-              <div style={styles.scoreboardRow}>
-                <span style={styles.scoreboardTeam}>{scoreboard.teamAName}</span>
-                <span style={styles.scoreboardScore}>{`${scoreboard.scoreA} - ${scoreboard.scoreB}`}</span>
-                <span style={styles.scoreboardTeam}>{scoreboard.teamBName}</span>
-              </div>
-            </div>
-          )}
         <button
           style={styles.removeButton}
           onClick={(e) => handleRemoveVideo(source.id, e)}
@@ -89,7 +62,6 @@ export default function VideoPreview({
             <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
           </svg>
         </button>
-        </>
       )}
       <div style={styles.videoWrapper}>
         {source.src ? (
@@ -252,35 +224,5 @@ const styles = {
     zIndex: 10,
     transition: 'all 0.2s ease',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-  },
-  scoreboardOverlay: {
-    position: 'absolute',
-    top: '8px',
-    left: '8px',
-    background: 'rgba(0, 0, 0, 0.65)',
-    padding: '6px 10px',
-    borderRadius: '6px',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    color: '#f5f5f5',
-    fontSize: '13px',
-    fontWeight: '700',
-    display: 'flex',
-    alignItems: 'center',
-    pointerEvents: 'none',
-    zIndex: 5,
-  },
-  scoreboardRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  scoreboardTeam: {
-    whiteSpace: 'nowrap',
-  },
-  scoreboardScore: {
-    padding: '4px 8px',
-    background: '#1f2937',
-    borderRadius: '4px',
-    fontVariantNumeric: 'tabular-nums',
   },
 };

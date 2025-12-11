@@ -50,23 +50,12 @@ export default function App() {
   // Clip creation state
   const [markIn, setMarkIn] = useState(null);
   const [markOut, setMarkOut] = useState(null);
-  const [goalTimestamp, setGoalTimestamp] = useState(null);
   const [clips, setClips] = useState([]);
 
   // Backend integration state
   const [sessionKey, setSessionKey] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
-  // Scoreboard overlay state
-  const [teamAName, setTeamAName] = useState('Team A');
-  const [teamBName, setTeamBName] = useState('Team B');
-  const [scoreA, setScoreA] = useState(0);
-  const [scoreB, setScoreB] = useState(0);
-
-  // Team selection modal state
-  const [showTeamModal, setShowTeamModal] = useState(false);
-  const [pendingClip, setPendingClip] = useState(null);
 
   // Cleanup blob URLs on unmount to prevent memory leaks
   useEffect(() => {
@@ -113,46 +102,6 @@ export default function App() {
       video.playbackRate = playbackSpeed;
     });
   }, [playbackSpeed]);
-
-  // Keyboard controls for seeking (left/right arrows) and play/pause (spacebar)
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      // Don't handle if user is typing in an input field
-      const target = event.target;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return;
-      }
-
-      // Only handle if videos are loaded
-      const videos = Object.values(videoRefs.current).filter(v => v);
-      if (videos.length === 0) {
-        return;
-      }
-
-      // Spacebar: play/pause
-      if (event.key === ' ' || event.key === 'Spacebar') {
-        event.preventDefault();
-        handlePlayPause();
-      }
-      // Left arrow: go back 5 seconds
-      else if (event.key === 'ArrowLeft' && duration > 0) {
-        event.preventDefault();
-        const newTime = Math.max(0, currentTime - 5);
-        handleSeek(newTime);
-      }
-      // Right arrow: go forward 5 seconds
-      else if (event.key === 'ArrowRight' && duration > 0) {
-        event.preventDefault();
-        const newTime = Math.min(duration, currentTime + 5);
-        handleSeek(newTime);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentTime, duration, isPlaying]);
 
   const handleVideoUpload = (sourceId, file) => {
     // Revoke old blob URL to prevent memory leak
@@ -265,156 +214,40 @@ export default function App() {
     setMarkOut(currentTime);
   };
 
-  const handleGoalMark = (time = null) => {
-    // Only allow goal marking if markIn and markOut are set
-    if (markIn !== null && markOut !== null) {
-      // Use provided time or currentTime, and ensure it's within the clip range
-      const targetTime = time !== null ? time : currentTime;
-      const goalTime = Math.max(markIn, Math.min(markOut, targetTime));
-      setGoalTimestamp(goalTime);
-    }
-  };
-
   const handleCreateClip = async () => {
     if (markIn !== null && markOut !== null && markOut > markIn) {
-      // Store clip data and show team selection modal
-      const clipData = {
+      const newClip = {
         id: Date.now(),
         source: activeSource,
         start: markIn,
         end: markOut,
         duration: markOut - markIn,
-        goalTimestamp: goalTimestamp, // Store goal timestamp relative to clip start
         backendClipId: null, // Will be set if backend creation succeeds
       };
-      setPendingClip(clipData);
-      setShowTeamModal(true);
-    }
-  };
 
-  const handleTeamSelection = async (scoringTeam) => {
-    if (!pendingClip) return;
-
-    const newClip = { ...pendingClip };
-    
-    // Store which team scored in this clip
-    if (scoringTeam === 'teamA') {
-      newClip.scoringTeam = 'teamA';
-    } else if (scoringTeam === 'teamB') {
-      newClip.scoringTeam = 'teamB';
-    } else {
-      newClip.scoringTeam = null;
-    }
-
-    // Calculate cumulative score by counting all previous clips + this one
-    let cumulativeScoreA = 0;
-    let cumulativeScoreB = 0;
-    
-    // Count scores from existing clips
-    clips.forEach(clip => {
-      if (clip.scoringTeam === 'teamA') {
-        cumulativeScoreA++;
-      } else if (clip.scoringTeam === 'teamB') {
-        cumulativeScoreB++;
-      }
-    });
-    
-    // Add this clip's score
-    if (scoringTeam === 'teamA') {
-      cumulativeScoreA++;
-    } else if (scoringTeam === 'teamB') {
-      cumulativeScoreB++;
-    }
-    
-    // Update state scores (for display)
-    setScoreA(cumulativeScoreA);
-    setScoreB(cumulativeScoreB);
-
-    // Also create clip on backend if session exists
-    if (sessionKey) {
-      try {
-        console.log('Creating backend clip...', newClip);
-        
-        // Calculate score BEFORE this clip
-        let scoreBeforeA = 0;
-        let scoreBeforeB = 0;
-        clips.forEach(clip => {
-          if (clip.scoringTeam === 'teamA') {
-            scoreBeforeA++;
-          } else if (clip.scoringTeam === 'teamB') {
-            scoreBeforeB++;
-          }
-        });
-        
-        // Calculate goal timestamp relative to clip start (0-based)
-        // If goalTimestamp is set and within clip range, use it; otherwise use midpoint
-        let goalTimeInClip = null;
-        if (newClip.goalTimestamp !== null && 
-            newClip.goalTimestamp >= newClip.start && 
-            newClip.goalTimestamp <= newClip.end) {
-          goalTimeInClip = newClip.goalTimestamp - newClip.start;
-        } else {
-          // Use midpoint if no goal timestamp is set
-          goalTimeInClip = newClip.duration / 2.0;
+      // Also create clip on backend if session exists
+      if (sessionKey) {
+        try {
+          console.log('Creating backend clip...', newClip);
+          const backendClip = await createBackendClip(sessionKey, newClip);
+          newClip.backendClipId = backendClip.clip_id; // Link backend clip to frontend clip
+          console.log('✅ Backend clip created:', backendClip.clip_id);
+        } catch (error) {
+          console.error('❌ Failed to create backend clip:', error);
+          alert(`Failed to create backend clip: ${error.message}\n\nFrontend clip was still created (preview only, won't be exported).`);
         }
-        
-        // Prepare scoreboard data for overlay
-        // scoreBefore: score at start of clip
-        // scoreAfter: score at end of clip (after this clip's score is added)
-        // goalTime: timestamp in clip when score should update
-        const scoreboardData = {
-          teamAName,
-          teamBName,
-          scoreBefore: {
-            teamAName,
-            teamBName,
-            scoreA: scoreBeforeA,
-            scoreB: scoreBeforeB,
-          },
-          scoreAfter: {
-            teamAName,
-            teamBName,
-            scoreA: cumulativeScoreA,
-            scoreB: cumulativeScoreB,
-          },
-          goalTime: goalTimeInClip, // Time in clip when score updates
-        };
-        
-        const backendClip = await createBackendClip(sessionKey, newClip, scoreboardData);
-        newClip.backendClipId = backendClip.clip_id; // Link backend clip to frontend clip
-        console.log('✅ Backend clip created with scoreboard overlay:', backendClip.clip_id);
-        console.log(`   Score: ${teamAName} ${cumulativeScoreA} - ${cumulativeScoreB} ${teamBName}`);
-      } catch (error) {
-        console.error('❌ Failed to create backend clip:', error);
-        alert(`Failed to create backend clip: ${error.message}\n\nFrontend clip was still created (preview only, won't be exported).`);
+      } else {
+        console.warn('⚠️ No backend session - clip created in frontend only (preview only, won\'t be exported)');
       }
-    } else {
-      console.warn('⚠️ No backend session - clip created in frontend only (preview only, won\'t be exported)');
-    }
 
-    setClips([...clips, newClip]);
-    setMarkIn(null);
-    setMarkOut(null);
-    setPendingClip(null);
-    setShowTeamModal(false);
+      setClips([...clips, newClip]);
+      setMarkIn(null);
+      setMarkOut(null);
+    }
   };
 
   const handleDeleteClip = (clipId) => {
-    const updatedClips = clips.filter((clip) => clip.id !== clipId);
-    setClips(updatedClips);
-    
-    // Recalculate scores after deletion
-    let newScoreA = 0;
-    let newScoreB = 0;
-    updatedClips.forEach(clip => {
-      if (clip.scoringTeam === 'teamA') {
-        newScoreA++;
-      } else if (clip.scoringTeam === 'teamB') {
-        newScoreB++;
-      }
-    });
-    setScoreA(newScoreA);
-    setScoreB(newScoreB);
+    setClips(clips.filter((clip) => clip.id !== clipId));
   };
 
   const handleMoveClip = (index, direction) => {
@@ -548,35 +381,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Team Selection Modal */}
-      {showTeamModal && (
-        <div style={styles.modalOverlay} onClick={() => { setShowTeamModal(false); setPendingClip(null); }}>
-          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>Who scored in this clip?</h2>
-            <div style={styles.modalButtons}>
-              <button
-                style={{ ...styles.modalButton, ...styles.teamAButton }}
-                onClick={() => handleTeamSelection('teamA')}
-              >
-                {teamAName}
-              </button>
-              <button
-                style={{ ...styles.modalButton, ...styles.teamBButton }}
-                onClick={() => handleTeamSelection('teamB')}
-              >
-                {teamBName}
-              </button>
-              <button
-                style={{ ...styles.modalButton, ...styles.noneButton }}
-                onClick={() => handleTeamSelection('none')}
-              >
-                None
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <header style={styles.header}>
         <div style={styles.headerContent}>
@@ -587,40 +391,6 @@ export default function App() {
       {/* Main Content */}
       <main style={styles.main}>
         <div style={styles.container}>
-          {/* Scoreboard Configuration */}
-          <div style={styles.scoreboardConfig}>
-            <div style={styles.scoreboardGroup}>
-              <label style={styles.scoreboardLabel}>Team A</label>
-              <input
-                style={styles.scoreboardInput}
-                value={teamAName}
-                onChange={(e) => setTeamAName(e.target.value)}
-              />
-              <input
-                style={styles.scoreboardScoreInput}
-                type="number"
-                min="0"
-                value={scoreA}
-                onChange={(e) => setScoreA(Number(e.target.value))}
-              />
-            </div>
-            <div style={styles.scoreboardGroup}>
-              <label style={styles.scoreboardLabel}>Team B</label>
-              <input
-                style={styles.scoreboardInput}
-                value={teamBName}
-                onChange={(e) => setTeamBName(e.target.value)}
-              />
-              <input
-                style={styles.scoreboardScoreInput}
-                type="number"
-                min="0"
-                value={scoreB}
-                onChange={(e) => setScoreB(Number(e.target.value))}
-              />
-            </div>
-          </div>
-
           {/* Video Preview Grid */}
           <div ref={videoPreviewRef}>
             <VideoPreview
@@ -632,14 +402,6 @@ export default function App() {
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
               onVideoUpload={handleVideoUpload}
-              showAllViews={markIn !== null || markOut !== null}
-              allVideosUploaded={videoFiles.left && videoFiles.left_zoom && videoFiles.right && videoFiles.right_zoom}
-              scoreboard={{
-                teamAName,
-                teamBName,
-                scoreA,
-                scoreB,
-              }}
             />
           </div>
 
@@ -654,8 +416,6 @@ export default function App() {
             markOut={markOut}
             onMarkIn={handleMarkIn}
             onMarkOut={handleMarkOut}
-            goalTimestamp={goalTimestamp}
-            onGoalMark={handleGoalMark}
             onCreateClip={handleCreateClip}
             activeSource={activeSource}
             playbackSpeed={playbackSpeed}
@@ -746,94 +506,5 @@ const styles = {
     fontSize: '14px',
     color: '#777',
     margin: 0,
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0, 0, 0, 0.85)',
-    backdropFilter: 'blur(8px)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10000,
-  },
-  modalContent: {
-    background: '#1a1a1a',
-    border: '2px solid #3b8bff',
-    borderRadius: '12px',
-    padding: '40px 60px',
-    textAlign: 'center',
-    boxShadow: '0 8px 32px rgba(59, 139, 255, 0.3)',
-    minWidth: '400px',
-  },
-  modalTitle: {
-    fontSize: '24px',
-    fontWeight: '700',
-    color: '#f5f5f5',
-    margin: '0 0 32px 0',
-  },
-  modalButtons: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  modalButton: {
-    padding: '16px 32px',
-    borderRadius: '8px',
-    fontSize: '18px',
-    fontWeight: '600',
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    color: 'white',
-  },
-  teamAButton: {
-    background: 'linear-gradient(135deg, #3b8bff, #2563eb)',
-  },
-  teamBButton: {
-    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-  },
-  noneButton: {
-    background: '#2a2a2a',
-    color: '#888',
-  },
-  scoreboardConfig: {
-    display: 'flex',
-    gap: '16px',
-    alignItems: 'center',
-    marginBottom: '16px',
-    background: '#111',
-    border: '1px solid #1f1f1f',
-    padding: '12px 16px',
-    borderRadius: '8px',
-  },
-  scoreboardGroup: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
-  scoreboardLabel: {
-    fontSize: '12px',
-    color: '#ccc',
-    minWidth: '52px',
-  },
-  scoreboardInput: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    color: '#f5f5f5',
-    padding: '6px 8px',
-    borderRadius: '4px',
-    minWidth: '120px',
-  },
-  scoreboardScoreInput: {
-    width: '60px',
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    color: '#f5f5f5',
-    padding: '6px 8px',
-    borderRadius: '4px',
   },
 };

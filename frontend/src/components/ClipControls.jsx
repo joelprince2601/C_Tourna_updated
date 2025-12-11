@@ -18,13 +18,6 @@ const ScissorsIcon = () => (
   </svg>
 );
 
-const GoalIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-    <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.5" fill="currentColor" opacity="0.3"/>
-    <path d="M8 3L8 13M3 8L13 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
-);
-
 export default function ClipControls({
   isPlaying,
   onPlayPause,
@@ -33,10 +26,8 @@ export default function ClipControls({
   onSeek,
   markIn,
   markOut,
-  goalTimestamp,
   onMarkIn,
   onMarkOut,
-  onGoalMark,
   onCreateClip,
   activeSource,
   playbackSpeed,
@@ -62,75 +53,10 @@ export default function ClipControls({
 
   const speedOptions = [0.5, 1, 1.5, 2, 3];
 
-  const handleTimelineClick = (e) => {
-    const scrubberContainer = e.currentTarget;
-    const rect = scrubberContainer.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percentage = clickX / rect.width;
-    const clickedTime = percentage * (duration || 100);
-    
-    // Determine which marker to update based on proximity
-    const threshold = 0.05; // 5% of timeline width
-    
-    if (markIn !== null && markOut !== null) {
-      // If clip range is set, check if click is within range for goal marking
-      if (clickedTime >= markIn && clickedTime <= markOut) {
-        // Within clip range - set goal
-        const goalTime = Math.max(markIn, Math.min(markOut, clickedTime));
-        onGoalMark(goalTime);
-        onSeek(goalTime);
-        return;
-      }
-    }
-    
-    // Check proximity to markIn
-    if (markIn !== null) {
-      const markInPercent = markIn / (duration || 100);
-      const distanceToMarkIn = Math.abs(percentage - markInPercent);
-      if (distanceToMarkIn < threshold) {
-        onMarkIn();
-        onSeek(clickedTime);
-        return;
-      }
-    }
-    
-    // Check proximity to markOut
-    if (markOut !== null) {
-      const markOutPercent = markOut / (duration || 100);
-      const distanceToMarkOut = Math.abs(percentage - markOutPercent);
-      if (distanceToMarkOut < threshold) {
-        onMarkOut();
-        onSeek(clickedTime);
-        return;
-      }
-    }
-    
-    // Check proximity to goal
-    if (goalTimestamp !== null && markIn !== null && markOut !== null) {
-      const goalPercent = (goalTimestamp - markIn) / (markOut - markIn);
-      const goalAbsolutePercent = markIn / (duration || 100) + goalPercent * (markOut - markIn) / (duration || 100);
-      const distanceToGoal = Math.abs(percentage - goalAbsolutePercent);
-      if (distanceToGoal < threshold) {
-        // Goal is closest, but we'll update it if within range
-        if (clickedTime >= markIn && clickedTime <= markOut) {
-          onGoalMark(clickedTime);
-          onSeek(clickedTime);
-          return;
-        }
-      }
-    }
-    
-    // Default: seek to clicked position
-    onSeek(clickedTime);
-  };
-
   return (
     <div style={styles.container}>
       {/* Timeline Scrubber */}
-      <div 
-        style={styles.scrubberContainer}
-        onClick={handleTimelineClick}
-      >
+      <div style={styles.scrubberContainer}>
         <input
           type="range"
           min="0"
@@ -138,7 +64,6 @@ export default function ClipControls({
           value={currentTime || 0}
           onChange={(e) => onSeek(parseFloat(e.target.value))}
           style={styles.scrubber}
-          onClick={(e) => e.stopPropagation()} // Prevent double handling
         />
         {/* Mark indicators on timeline */}
         {markIn !== null && (
@@ -156,17 +81,6 @@ export default function ClipControls({
               ...styles.markIndicator,
               left: `${(markOut / (duration || 100)) * 100}%`,
               background: "#f87171",
-            }}
-          />
-        )}
-        {goalTimestamp !== null && markIn !== null && markOut !== null && 
-         goalTimestamp >= markIn && goalTimestamp <= markOut && (
-          <div
-            style={{
-              ...styles.markIndicator,
-              left: `${(goalTimestamp / (duration || 100)) * 100}%`,
-              background: "#fbbf24",
-              width: '4px',
             }}
           />
         )}
@@ -205,7 +119,7 @@ export default function ClipControls({
           </div>
         </div>
 
-        {/* Middle Section: Mark In/Out/Goal */}
+        {/* Middle Section: Mark In/Out */}
         <div style={styles.section}>
           <button
             style={{ ...styles.button, ...styles.markButton }}
@@ -223,21 +137,6 @@ export default function ClipControls({
             <MarkOutIcon />
             {markOut !== null && (
               <span style={styles.markTime}>{formatTime(markOut)}</span>
-            )}
-          </button>
-          <button
-            style={{ 
-              ...styles.button, 
-              ...styles.markButton,
-              ...(goalTimestamp !== null ? styles.goalButtonActive : {})
-            }}
-            onClick={() => onGoalMark()}
-            disabled={markIn === null || markOut === null}
-            title="Mark goal timestamp at current time (must set Mark In/Out first)"
-          >
-            <GoalIcon />
-            {goalTimestamp !== null && (
-              <span style={styles.markTime}>{formatTime(goalTimestamp)}</span>
             )}
           </button>
         </div>
@@ -290,7 +189,6 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     marginBottom: '12px',
-    cursor: 'pointer',
   },
   scrubber: {
     width: '100%',
@@ -381,10 +279,6 @@ const styles = {
   markButton: {
     background: '#2a2a2a',
     color: '#f5f5f5',
-  },
-  goalButtonActive: {
-    background: '#fbbf24',
-    color: '#000',
   },
   markTime: {
     marginLeft: '4px',
